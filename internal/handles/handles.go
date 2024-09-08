@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"net/http"
 	"strconv"
 	"strings"
@@ -172,7 +173,13 @@ func (rts *Routes) NewTender(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(err_response)
 		return
 	}
-	//todo checking uuid format
+	_, err = uuid.Parse(params.OrganizationId)
+	if err != nil {
+		err_response["reason"] = InvalidParams + ": неверный формат поля organizationId"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
 	user_id, err := rts.dbq.FetchUserID(rts.ctx, params.CreatorUsername)
 	if err != nil {
 		if err == sql.ErrNoRows {
