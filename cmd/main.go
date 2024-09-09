@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"tender_service/internal/database"
@@ -27,32 +28,14 @@ func main() {
 	}
 	ctx := context.Background()
 	storage := database.NewService(db)
-	router := handles.New(ctx, storage)
-	//types := []string{}
-	//listtenders, _ := storage.FetchListTenders(ctx, &database.ListTendersParams{
-	//	Service_type: types,
-	//	Offset:       0,
-	//	Limit:        10,
-	//})
-	//var listTenders []Tender
-	//for _, item := range listtenders {
-	//	listTenders = append(listTenders, Tender{
-	//		ID:          item.ID.String(),
-	//		Name:        item.Name,
-	//		Description: item.Description,
-	//		Status:      item.Status,
-	//		ServiceType: item.ServiceType,
-	//		Version:     item.Version,
-	//		CreatedAt:   item.CreatedAt,
-	//	})
-	//}
-	//result, _ := json.Marshal(listTenders)
-	//fmt.Println(string(result))
-	http.HandleFunc("/api/ping", router.Ping)
-	http.HandleFunc("/api/tenders", router.TenderList)
-	http.HandleFunc("/api/tenders/new", router.NewTender)
-	//http.HandleFunc("/users/refresh", router.RefreshToken)
-	//http.HandleFunc("/users/refresh", router.RefreshToken)
+	handle := handles.New(ctx, storage)
+	router := mux.NewRouter()
+	router.HandleFunc("/api/ping", handle.Ping)
+	router.HandleFunc("/api/tenders", handle.TenderList)
+	router.HandleFunc("/api/tenders/new", handle.NewTender)
+	router.HandleFunc("/api/tenders/my", handle.TenderMyList)
+	router.HandleFunc("/api/tenders/{id}/status", handle.GetTenderStatus).Methods("GET")
+	router.HandleFunc("/api/tenders/{id}/status", handle.ChangeTenderStatus).Methods("PUT")
 	fmt.Println("Сервер запущен на порту 8080")
-	log.Fatal(http.ListenAndServe("0.0.0.0:8080", nil))
+	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
 }

@@ -30,7 +30,7 @@ ALTER TABLE
 CREATE TABLE "organization"(
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" VARCHAR(100) NOT NULL,
-    "description" TEXT NULL,
+    "description" TEXT NULL DEFAULT " ",
     "type" VARCHAR(10) NOT NULL,
     "created_at" TIMESTAMP(0) WITHOUT TIME ZONE NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(0) WITHOUT TIME ZONE NULL DEFAULT CURRENT_TIMESTAMP
@@ -47,6 +47,7 @@ CREATE TABLE "review"(
 );
 ALTER TABLE
     "review" ADD PRIMARY KEY("id");
+
 CREATE TABLE "tender"(
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "organization_id" UUID NULL,
@@ -58,7 +59,7 @@ CREATE TABLE "tender"(
         "version" INTEGER NOT NULL DEFAULT '1',
     "service_type" VARCHAR(50) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
-    "description" TEXT NULL,
+    "description" TEXT NULL DEFAULT " ",
     "created_at" TIMESTAMP(0) WITHOUT TIME ZONE NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(0) WITHOUT TIME ZONE NULL DEFAULT CURRENT_TIMESTAMP
 );
