@@ -1,5 +1,7 @@
 package utils
 
+import "strconv"
+
 func CheckString(str string, allowedValues []string) bool {
 	for _, value := range allowedValues {
 		if str == value {
@@ -7,4 +9,9 @@ func CheckString(str string, allowedValues []string) bool {
 		}
 	}
 	return false
+}
+
+func IsNumeric(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
 }

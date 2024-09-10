@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"tender_service/internal/database"
 	"tender_service/internal/handles"
+	"tender_service/internal/service"
 	"time"
 )
 
@@ -27,8 +28,10 @@ func main() {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
+
 	storage := database.NewService(db)
-	handle := handles.New(ctx, storage)
+	srv := service.New(storage)
+	handle := handles.New(ctx, srv)
 	router := mux.NewRouter()
 	router.HandleFunc("/api/ping", handle.Ping)
 	router.HandleFunc("/api/tenders", handle.TenderList)

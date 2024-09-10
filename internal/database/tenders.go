@@ -175,36 +175,27 @@ func (q *Queries) CheckTenderStatus(ctx context.Context, tender_id string) (stri
 	return status, err
 }
 
-type TenderSmResponce struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
-	Status       string    `json:"status"`
-	Service_type string    `json:"serviceType"`
-	Version      int32     `json:"version"`
-	Created_at   time.Time `json:"createdAt"`
-}
-
-func (q *Queries) ChangeTenderStatus(ctx context.Context, tender_id, new_status string) (TenderSmResponce, error) {
+func (q *Queries) ChangeTenderStatus(ctx context.Context, tender_id, new_status string) (*Tender, error) {
 	sqlquery := `UPDATE tender SET
                   status = $1
                   WHERE id = $2 
                   RETURNING id, name, description, status, service_type, version, created_at`
 	row := q.db.QueryRowContext(ctx, sqlquery, new_status, tender_id)
-	var i TenderSmResponce
+	var i Tender
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Description,
 		&i.Status,
-		&i.Service_type,
+		&i.ServiceType,
 		&i.Version,
-		&i.Created_at,
+		&i.CreatedAt,
 	)
-	return i, err
+	return &i, err
 }
 
 type TenderChangeParam struct {
+	Tender_id    string
 	Name         string
 	Description  string
 	Service_type string
@@ -235,21 +226,21 @@ func buildUpdateQuery(param TenderChangeParam) string {
 	return query
 }
 
-func (q *Queries) ChangeTender(ctx context.Context, tender_id string, param TenderChangeParam) (TenderSmResponce, error) {
+func (q *Queries) EditTender(ctx context.Context, param TenderChangeParam) (*Tender, error) {
 	sqlquery := buildUpdateQuery(param)
 	now := time.Now()
-	row := q.db.QueryRowContext(ctx, sqlquery, tender_id, now)
-	var i TenderSmResponce
+	row := q.db.QueryRowContext(ctx, sqlquery, param.Tender_id, now)
+	var i Tender
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Description,
 		&i.Status,
-		&i.Service_type,
+		&i.ServiceType,
 		&i.Version,
-		&i.Created_at,
+		&i.CreatedAt,
 	)
-	return i, err
+	return &i, err
 }
 
 type CreateTenderHistoryParams struct {
@@ -273,4 +264,30 @@ func (q *Queries) CreateTenderHistory(ctx context.Context, params CreateTenderHi
 		params.OldVersion,
 	)
 	return err
+}
+
+type CreateTenderWithTxParam struct {
+	ChangeTenderParam  TenderChangeParam
+	TenderHistoryParam CreateTenderHistoryParams
+}
+
+func (q *Queries) CreateTenderWithTX(ctx context.Context, params CreateTenderWithTxParam) (*Tender, error) {
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	//редактирование тендера
+	tender, err := q.EditTender(ctx, params.ChangeTenderParam)
+	if err != nil {
+		return nil, err
+	}
+	//создание истории изменений
+	err = q.CreateTenderHistory(ctx, params.TenderHistoryParam)
+	if err != nil {
+		return nil, err
+	}
+
+	return tender, tx.Commit()
 }

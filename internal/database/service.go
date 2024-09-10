@@ -10,6 +10,7 @@ type DBTX interface {
 	PrepareContext(context.Context, string) (*sql.Stmt, error)
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 }
 
 func NewService(db DBTX) *Queries {
@@ -20,8 +21,8 @@ type Queries struct {
 	db DBTX
 }
 
-func (q *Queries) WithTx(tx *sql.Tx) *Queries {
-	return &Queries{
-		db: tx,
-	}
-}
+//func (q *Queries) WithTx(tx *sql.Tx) *Queries {
+//	return &Queries{
+//		db: tx,
+//	}
+//}

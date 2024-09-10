@@ -2,15 +2,12 @@ package handles
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"github.com/google/uuid"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
-	"tender_service/internal/database"
+	"tender_service/internal/service"
 	"tender_service/internal/utils"
 	"time"
 )
@@ -24,25 +21,29 @@ var (
 	FieldRequired    = " является обязательным для заполнения"
 )
 
-type Routes struct {
-	dbq *database.Queries
+type Handle struct {
+	srv *service.Service
 	ctx context.Context
-	mu  sync.Mutex
 }
 
-func New(ctx context.Context, dbq *database.Queries) *Routes {
-	return &Routes{
-		dbq: dbq,
+func New(ctx context.Context, s *service.Service) *Handle {
+	return &Handle{
+		srv: s,
 		ctx: ctx,
 	}
 }
 
-func isNumeric(s string) bool {
-	_, err := strconv.ParseFloat(s, 64)
-	return err == nil
+type Tender struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"`
+	ServiceType string    `json:"serviceType"`
+	Version     int32     `json:"version"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
-func (rts *Routes) Ping(w http.ResponseWriter, r *http.Request) {
+func (h *Handle) Ping(w http.ResponseWriter, r *http.Request) {
 	err_response := map[string]interface{}{
 		"reason": "",
 	}
@@ -58,17 +59,7 @@ func (rts *Routes) Ping(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
-type Tender struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	ServiceType string    `json:"serviceType"`
-	Version     int32     `json:"version"`
-	CreatedAt   time.Time `json:"createdAt"`
-}
-
-func (rts *Routes) TenderList(w http.ResponseWriter, r *http.Request) {
+func (h *Handle) TenderList(w http.ResponseWriter, r *http.Request) {
 	err_response := map[string]interface{}{
 		"reason": "",
 	}
@@ -85,14 +76,14 @@ func (rts *Routes) TenderList(w http.ResponseWriter, r *http.Request) {
 	offset_param := queryParams.Get("offset")
 	type_param := queryParams.Get("service_type")
 
-	if limit_param == "" || !isNumeric(limit_param) {
+	if limit_param == "" || !utils.IsNumeric(limit_param) {
 		limit = 5
 	} else {
 		tl, _ := strconv.Atoi(limit_param)
 		limit = int32(tl)
 	}
 
-	if offset_param == "" || !isNumeric(offset_param) {
+	if offset_param == "" || !utils.IsNumeric(offset_param) {
 		offset = 0
 	} else {
 		tl, _ := strconv.Atoi(offset_param)
@@ -101,42 +92,32 @@ func (rts *Routes) TenderList(w http.ResponseWriter, r *http.Request) {
 	if type_param != "" {
 		service_type = strings.Split(type_param, ",")
 	}
-
-	listtenders, err := rts.dbq.PublishedListTenders(rts.ctx, database.ListTendersParams{
+	tender_list_request := service.ListTendersRequest{
 		Service_type: service_type,
 		Offset:       offset,
 		Limit:        limit,
-	})
+	}
+
+	listTenders, err := h.srv.FetchPublishedTenders(h.ctx, tender_list_request)
 	if err != nil {
-		fmt.Println(err)
+		if err == service.CreateTenderError {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
 	}
-	var listTenders []Tender
-	for _, item := range listtenders {
-		listTenders = append(listTenders, Tender{
-			ID:          item.ID.String(),
-			Name:        item.Name,
-			Description: item.Description,
-			Status:      item.Status,
-			ServiceType: item.ServiceType,
-			Version:     item.Version,
-			CreatedAt:   item.CreatedAt,
-		})
-	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(listTenders)
 }
 
-type TenderParams struct {
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	ServiceType     string `json:"serviceType"`
-	Status          string `json:"status"`
-	OrganizationId  string `json:"organizationId"`
-	CreatorUsername string `json:"creatorUsername"`
-}
-
-func (rts *Routes) NewTender(w http.ResponseWriter, r *http.Request) {
+func (h *Handle) NewTender(w http.ResponseWriter, r *http.Request) {
 	err_response := map[string]interface{}{
 		"reason": "",
 	}
@@ -146,7 +127,7 @@ func (rts *Routes) NewTender(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(err_response)
 		return
 	}
-	var params TenderParams
+	var params service.TenderParams
 
 	err := json.NewDecoder(r.Body).Decode(&params)
 	if err != nil {
@@ -181,57 +162,31 @@ func (rts *Routes) NewTender(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(err_response)
 		return
 	}
-	user_id, err := rts.dbq.FetchUserID(rts.ctx, params.CreatorUsername)
+	tenderResponse, err := h.srv.CreateNewTender(h.ctx, params)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = UserNotFound
+		if err == service.IsNotResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(err_response)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	valid, err := rts.dbq.IsResponsible(rts.ctx, params.OrganizationId, user_id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !valid {
-		err_response["reason"] = IsNotResponsible
-		w.WriteHeader(http.StatusForbidden)
+		err_response["reason"] = service.UnknowError
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(err_response)
 		return
-	}
-
-	tender, err := rts.dbq.CreateTender(rts.ctx, database.CreateTenderParams{
-		OrganizationID: params.OrganizationId,
-		CreatorID:      user_id,
-		Status:         params.Status,
-		ServiceType:    params.ServiceType,
-		Name:           params.Name,
-		Description:    params.Description,
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	tenderResponse := Tender{
-		ID:          tender.ID,
-		Name:        params.Name,
-		Description: params.Description,
-		Status:      params.Status,
-		ServiceType: params.ServiceType,
-		Version:     tender.Version,
-		CreatedAt:   tender.CreatedAt,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(tenderResponse)
 }
 
-func (rts *Routes) TenderMyList(w http.ResponseWriter, r *http.Request) {
+func (h *Handle) TenderMyList(w http.ResponseWriter, r *http.Request) {
 	err_response := map[string]interface{}{
 		"reason": "",
 	}
@@ -247,58 +202,43 @@ func (rts *Routes) TenderMyList(w http.ResponseWriter, r *http.Request) {
 	offset_param := queryParams.Get("offset")
 	username := queryParams.Get("username")
 
-	if limit_param == "" || !isNumeric(limit_param) {
+	if limit_param == "" || !utils.IsNumeric(limit_param) {
 		limit = 5
 	} else {
 		tl, _ := strconv.Atoi(limit_param)
 		limit = int32(tl)
 	}
 
-	if offset_param == "" || !isNumeric(offset_param) {
+	if offset_param == "" || !utils.IsNumeric(offset_param) {
 		offset = 0
 	} else {
 		tl, _ := strconv.Atoi(offset_param)
 		offset = int32(tl)
 	}
 
-	user_id, err := rts.dbq.FetchUserID(rts.ctx, username)
+	listTenders, err := h.srv.FetchMyTenders(h.ctx, service.ListMyTendersRequest{
+		Username: username,
+		Offset:   offset,
+		Limit:    limit,
+	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = UserNotFound
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(err_response)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
 		return
-	}
-
-	listtenders, err := rts.dbq.MyListTenders(rts.ctx, &database.MyListTendersParams{
-		User_id: user_id,
-		Offset:  offset,
-		Limit:   limit,
-	})
-	if err != nil {
-		fmt.Println(err)
-	}
-	var listTenders []Tender
-	for _, item := range listtenders {
-		listTenders = append(listTenders, Tender{
-			ID:          item.ID.String(),
-			Name:        item.Name,
-			Description: item.Description,
-			Status:      item.Status,
-			ServiceType: item.ServiceType,
-			Version:     item.Version,
-			CreatedAt:   item.CreatedAt,
-		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(listTenders)
 }
 
-func (rts *Routes) GetTenderStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Handle) GetTenderStatus(w http.ResponseWriter, r *http.Request) {
 	err_response := map[string]interface{}{
 		"reason": "",
 	}
@@ -312,23 +252,10 @@ func (rts *Routes) GetTenderStatus(w http.ResponseWriter, r *http.Request) {
 	queryParams := r.URL.Query()
 	username := queryParams.Get("username")
 
-	_, err := rts.dbq.FetchUserID(rts.ctx, username)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = UserNotFound
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(err_response)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	//из понимания задачи проверка статуса должна быть доступна всем пользователям
-	//по этому проверку на ответственное лицо пока вырезал
-
 	pathParts := r.URL.Path[len("/api/tenders/"):]
 	tender_id := strings.Split(pathParts, "/")[0]
-	_, err = uuid.Parse(tender_id)
+
+	_, err := uuid.Parse(tender_id)
 	if err != nil {
 		err_response["reason"] = InvalidParams + ": некорректный формат id тендера"
 		w.WriteHeader(http.StatusBadRequest)
@@ -336,20 +263,36 @@ func (rts *Routes) GetTenderStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tender_status, err := rts.dbq.CheckTenderStatus(rts.ctx, tender_id)
+	tender_status, err := h.srv.FetchTenderStatus(h.ctx, username, tender_id)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = TenderNotFound
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.IsNotResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.TenderNotFound {
+			err_response["reason"] = err.Error()
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(err_response)
 			return
 		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(tender_status)
 }
 
-func (rts *Routes) ChangeTenderStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Handle) ChangeTenderStatus(w http.ResponseWriter, r *http.Request) {
 	err_response := map[string]interface{}{
 		"reason": "",
 	}
@@ -392,52 +335,37 @@ func (rts *Routes) ChangeTenderStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user_id, err := rts.dbq.FetchUserID(rts.ctx, username)
+	tender, err := h.srv.EditTenderStatus(h.ctx, service.EditTenderStatusRequest{
+		Username:   username,
+		Tender_id:  tender_id,
+		New_status: newstatus,
+	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = UserNotFound
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(err_response)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	tender, err := rts.dbq.GetTender(rts.ctx, tender_id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = TenderNotFound
-			w.WriteHeader(http.StatusNotFound)
+		if err == service.IsNotResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusForbidden)
 			json.NewEncoder(w).Encode(err_response)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	valid, err := rts.dbq.IsResponsible(rts.ctx, tender.OrganizationID.String(), user_id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !valid {
-		err_response["reason"] = IsNotResponsible
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(err_response)
-		return
-	}
-
-	new_tender, err := rts.dbq.ChangeTenderStatus(rts.ctx, tender_id, newstatus)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = TenderNotFound
+		if err == service.TenderNotFound {
+			err_response["reason"] = err.Error()
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(err_response)
 			return
 		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(new_tender)
+	json.NewEncoder(w).Encode(tender)
 }
 
 type TenderChangeRequest struct {
@@ -446,7 +374,7 @@ type TenderChangeRequest struct {
 	Service_type string `json:"serviceType"`
 }
 
-func (rts *Routes) ChangeTender(w http.ResponseWriter, r *http.Request) {
+func (h *Handle) ChangeTender(w http.ResponseWriter, r *http.Request) {
 	err_response := map[string]interface{}{
 		"reason": "",
 	}
@@ -471,40 +399,7 @@ func (rts *Routes) ChangeTender(w http.ResponseWriter, r *http.Request) {
 	queryParams := r.URL.Query()
 
 	username := queryParams.Get("username")
-	user_id, err := rts.dbq.FetchUserID(rts.ctx, username)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = UserNotFound
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(err_response)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 
-	tender, err := rts.dbq.GetTender(rts.ctx, tender_id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = TenderNotFound
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(err_response)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	valid, err := rts.dbq.IsResponsible(rts.ctx, tender.OrganizationID.String(), user_id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !valid {
-		err_response["reason"] = IsNotResponsible
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(err_response)
-		return
-	}
 	var param TenderChangeRequest
 	err = json.NewDecoder(r.Body).Decode(&param)
 	if err != nil {
@@ -514,33 +409,13 @@ func (rts *Routes) ChangeTender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	new_tender, err := rts.dbq.ChangeTender(rts.ctx, tender_id, database.TenderChangeParam{
+	new_tender, err := h.srv.EditTender(h.ctx, service.EditTenderRequest{
+		Username:     username,
+		Tender_id:    tender_id,
 		Name:         param.Name,
 		Description:  param.Description,
 		Service_type: param.Service_type,
 	})
-	if err != nil {
-		if err == sql.ErrNoRows {
-			err_response["reason"] = TenderNotFound
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(err_response)
-			return
-		}
-	}
-	err = rts.dbq.CreateTenderHistory(rts.ctx, database.CreateTenderHistoryParams{
-		Tender_id:   tender.ID.String(),
-		Creator_id:  user_id,
-		ServiceType: tender.ServiceType,
-		Name:        tender.Name,
-		Description: tender.Description,
-		OldVersion:  tender.Version,
-	})
-	if err != nil {
-		err_response["reason"] = err.Error()
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(err_response)
-		return
-	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(new_tender)
 }
