@@ -36,6 +36,7 @@ func main() {
 	router.HandleFunc("/api/tenders/my", handle.TenderMyList)
 	router.HandleFunc("/api/tenders/{id}/status", handle.GetTenderStatus).Methods("GET")
 	router.HandleFunc("/api/tenders/{id}/status", handle.ChangeTenderStatus).Methods("PUT")
+	router.HandleFunc("/api/tenders/{id}/edit", handle.ChangeTender).Methods("PATCH")
 	fmt.Println("Сервер запущен на порту 8080")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8080", router))
 }

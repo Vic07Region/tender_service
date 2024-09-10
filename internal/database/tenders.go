@@ -203,3 +203,74 @@ func (q *Queries) ChangeTenderStatus(ctx context.Context, tender_id, new_status 
 	)
 	return i, err
 }
+
+type TenderChangeParam struct {
+	Name         string
+	Description  string
+	Service_type string
+}
+
+func buildUpdateQuery(param TenderChangeParam) string {
+	query := "UPDATE tender SET version = version + 1, "
+
+	var setClauses []string
+	if param.Name != "" {
+		setClauses = append(setClauses, fmt.Sprintf("name = '%s'", param.Name))
+	}
+	if param.Description != "" {
+		setClauses = append(setClauses, fmt.Sprintf("description = '%s'", param.Description))
+	}
+	if param.Service_type != "" {
+		setClauses = append(setClauses, fmt.Sprintf("service_type = '%s'", param.Service_type))
+	}
+
+	if len(setClauses) > 0 {
+		query += strings.Join(setClauses, ", ")
+	} else {
+		return "UPDATE tender SET "
+	}
+
+	query += ",updated_at = $2 WHERE id = $1 RETURNING id, name, description, status, service_type, version, created_at"
+
+	return query
+}
+
+func (q *Queries) ChangeTender(ctx context.Context, tender_id string, param TenderChangeParam) (TenderSmResponce, error) {
+	sqlquery := buildUpdateQuery(param)
+	now := time.Now()
+	row := q.db.QueryRowContext(ctx, sqlquery, tender_id, now)
+	var i TenderSmResponce
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.Service_type,
+		&i.Version,
+		&i.Created_at,
+	)
+	return i, err
+}
+
+type CreateTenderHistoryParams struct {
+	Tender_id   string
+	Creator_id  string
+	ServiceType string
+	Name        string
+	Description string
+	OldVersion  int32
+}
+
+func (q *Queries) CreateTenderHistory(ctx context.Context, params CreateTenderHistoryParams) error {
+	sqlquery := `INSERT INTO tender_history (tender_id, creator_id, service_type, name, description, version)
+	VALUES ($1,$2,$3,$4,$5,$6)`
+	_, err := q.db.ExecContext(ctx, sqlquery,
+		params.Tender_id,
+		params.Creator_id,
+		params.ServiceType,
+		params.Name,
+		params.Description,
+		params.OldVersion,
+	)
+	return err
+}

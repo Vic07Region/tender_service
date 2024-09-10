@@ -439,3 +439,108 @@ func (rts *Routes) ChangeTenderStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(new_tender)
 }
+
+type TenderChangeRequest struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Service_type string `json:"serviceType"`
+}
+
+func (rts *Routes) ChangeTender(w http.ResponseWriter, r *http.Request) {
+	err_response := map[string]interface{}{
+		"reason": "",
+	}
+	if r.Method != http.MethodPatch {
+		err_response["reason"] = MethodNotAllowed
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	pathParts := r.URL.Path[len("/api/tenders/"):]
+
+	tender_id := strings.Split(pathParts, "/")[0]
+	_, err := uuid.Parse(tender_id)
+	if err != nil {
+		err_response["reason"] = InvalidParams + ": некорректный формат id тендера"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	queryParams := r.URL.Query()
+
+	username := queryParams.Get("username")
+	user_id, err := rts.dbq.FetchUserID(rts.ctx, username)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			err_response["reason"] = UserNotFound
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	tender, err := rts.dbq.GetTender(rts.ctx, tender_id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			err_response["reason"] = TenderNotFound
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	valid, err := rts.dbq.IsResponsible(rts.ctx, tender.OrganizationID.String(), user_id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !valid {
+		err_response["reason"] = IsNotResponsible
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	var param TenderChangeRequest
+	err = json.NewDecoder(r.Body).Decode(&param)
+	if err != nil {
+		err_response["reason"] = InvalidParams + err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	new_tender, err := rts.dbq.ChangeTender(rts.ctx, tender_id, database.TenderChangeParam{
+		Name:         param.Name,
+		Description:  param.Description,
+		Service_type: param.Service_type,
+	})
+	if err != nil {
+		if err == sql.ErrNoRows {
+			err_response["reason"] = TenderNotFound
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+	}
+	err = rts.dbq.CreateTenderHistory(rts.ctx, database.CreateTenderHistoryParams{
+		Tender_id:   tender.ID.String(),
+		Creator_id:  user_id,
+		ServiceType: tender.ServiceType,
+		Name:        tender.Name,
+		Description: tender.Description,
+		OldVersion:  tender.Version,
+	})
+	if err != nil {
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(new_tender)
+}
