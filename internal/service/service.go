@@ -11,11 +11,12 @@ import (
 )
 
 var (
-	UnknowError       = fmt.Errorf("unknown server error")
-	CreateTenderError = fmt.Errorf("Ошибка в создании тендера")
-	UserNotFound      = fmt.Errorf("Пользователь с таким именем не существует")
-	IsNotResponsible  = fmt.Errorf("Пользователь не является ответственным в организации")
-	TenderNotFound    = fmt.Errorf("Тендер с таким id не существует")
+	UnknowError           = fmt.Errorf("unknown server error")
+	CreateTenderError     = fmt.Errorf("Ошибка в создании тендера")
+	UserNotFound          = fmt.Errorf("Пользователь с таким именем не существует")
+	IsNotResponsible      = fmt.Errorf("Пользователь не является ответственным в организации")
+	TenderNotFound        = fmt.Errorf("Тендер с таким id не существует")
+	TenderHistoryNotFound = fmt.Errorf("Версия тендера с таким номером не существует")
 )
 
 type Service struct {
@@ -284,7 +285,7 @@ func (s *Service) EditTender(ctx context.Context, params EditTenderRequest) (*Te
 	if err != nil {
 		return nil, err
 	}
-	new_tender, err := s.query.CreateTenderWithTX(ctx, database.CreateTenderWithTxParam{
+	new_tender, err := s.query.EditTenderWithTX(ctx, database.EditTenderWithTxParam{
 		ChangeTenderParam: database.TenderChangeParam{
 			Tender_id:    tender.ID.String(),
 			Name:         params.Name,
@@ -304,7 +305,79 @@ func (s *Service) EditTender(ctx context.Context, params EditTenderRequest) (*Te
 		if err == sql.ErrNoRows {
 			return nil, TenderNotFound
 		}
-		log.Println("EditTenderStatus: CreateTenderWithTX err -", err)
+		log.Println("EditTenderStatus: EditTenderWithTX err -", err)
+		return nil, UnknowError
+	}
+	return &Tender{
+		ID:          new_tender.ID.String(),
+		Name:        new_tender.Name,
+		Description: new_tender.Description,
+		Status:      new_tender.Status,
+		ServiceType: new_tender.ServiceType,
+		Version:     new_tender.Version,
+		CreatedAt:   new_tender.CreatedAt,
+	}, nil
+}
+
+type RollbackTenderRequest struct {
+	Username  string
+	Tender_id string
+	Version   int32
+}
+
+func (s *Service) RollbackTender(ctx context.Context, params RollbackTenderRequest) (*Tender, error) {
+	user_id, err := s.query.FetchUserID(ctx, params.Username)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, UserNotFound
+		}
+		log.Println("RollbackTender: FetchUserID err -", err)
+		return nil, UnknowError
+	}
+	tender, err := s.query.GetTender(ctx, params.Tender_id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, TenderNotFound
+		}
+		log.Println("RollbackTender: GetTender err -", err)
+		return nil, UnknowError
+	}
+
+	err = s.isResponsibleUser(ctx, tender.OrganizationID.String(), user_id)
+	if err != nil {
+		return nil, err
+	}
+
+	tender_history, err := s.query.GetTenderHistory(ctx, tender.ID.String(), params.Version)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, TenderHistoryNotFound
+		}
+		log.Println("RollbackTender: GetTenderHistory err -", err)
+		return nil, UnknowError
+	}
+
+	new_tender, err := s.query.EditTenderWithTX(ctx, database.EditTenderWithTxParam{
+		ChangeTenderParam: database.TenderChangeParam{
+			Tender_id:    tender.ID.String(),
+			Name:         tender_history.Name,
+			Description:  tender_history.Description,
+			Service_type: tender_history.ServiceType,
+		},
+		TenderHistoryParam: database.CreateTenderHistoryParams{
+			Tender_id:   tender.ID.String(),
+			Creator_id:  user_id,
+			ServiceType: tender.ServiceType,
+			Name:        tender.Name,
+			Description: tender.Description,
+			OldVersion:  tender.Version,
+		},
+	})
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, TenderNotFound
+		}
+		log.Println("RollbackTender: EditTenderWithTX err -", err)
 		return nil, UnknowError
 	}
 	return &Tender{

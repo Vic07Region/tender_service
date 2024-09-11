@@ -31,9 +31,9 @@ func (q *Queries) PublishedListTenders(ctx context.Context, params ListTendersPa
 	var sqlquery string
 	if len(params.Service_type) > 0 {
 		service_type := strings.Join(params.Service_type, "', '")
-		sqlquery = fmt.Sprintf("SELECT id, organization_id, creator_id, status, version, service_type, name, description, created_at, updated_at FROM tender WHERE status = 'Published' AND service_type in ('%s') OFFSET $1 LIMIT $2", service_type)
+		sqlquery = fmt.Sprintf("SELECT id, organization_id, creator_id, status, version, service_type, name, description, created_at, updated_at FROM tender WHERE status = 'Published' AND service_type in ('%s') ORDER BY name OFFSET $1 LIMIT $2", service_type)
 	} else {
-		sqlquery = "SELECT id, organization_id, creator_id, status, version, service_type, name, description, created_at, updated_at FROM tender WHERE status = 'Published' OFFSET $1 LIMIT $2"
+		sqlquery = "SELECT id, organization_id, creator_id, status, version, service_type, name, description, created_at, updated_at FROM tender WHERE status = 'Published' ORDER BY name OFFSET $1 LIMIT $2"
 	}
 	rows, err := q.db.QueryContext(ctx, sqlquery, params.Offset, params.Limit)
 	if err != nil {
@@ -133,7 +133,7 @@ func (q *Queries) MyListTenders(ctx context.Context, params *MyListTendersParams
        organization_id, creator_id, status, version, service_type, name, 
        description, created_at, updated_at 
 	   FROM tender 
-	   WHERE creator_id = $1 OFFSET $2 LIMIT $3`
+	   WHERE creator_id = $1 ORDER BY name OFFSET $2 LIMIT $3`
 	rows, err := q.db.QueryContext(ctx, sqlquery, params.User_id, params.Offset, params.Limit)
 	if err != nil {
 		return nil, err
@@ -266,12 +266,12 @@ func (q *Queries) CreateTenderHistory(ctx context.Context, params CreateTenderHi
 	return err
 }
 
-type CreateTenderWithTxParam struct {
+type EditTenderWithTxParam struct {
 	ChangeTenderParam  TenderChangeParam
 	TenderHistoryParam CreateTenderHistoryParams
 }
 
-func (q *Queries) CreateTenderWithTX(ctx context.Context, params CreateTenderWithTxParam) (*Tender, error) {
+func (q *Queries) EditTenderWithTX(ctx context.Context, params EditTenderWithTxParam) (*Tender, error) {
 	tx, err := q.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -290,4 +290,31 @@ func (q *Queries) CreateTenderWithTX(ctx context.Context, params CreateTenderWit
 	}
 
 	return tender, tx.Commit()
+}
+
+type TenderHistory struct {
+	Tender_id   string
+	Creator_id  string
+	ServiceType string
+	Name        string
+	Description string
+	Version     int32
+}
+
+func (q *Queries) GetTenderHistory(ctx context.Context, tender_id string, version int32) (*TenderHistory, error) {
+	sqlquery := `SELECT tender_id, 
+       creator_id, service_type,
+       name, description, version FROM tender_history WHERE tender_id = $1 AND version = $2 LIMIT 1`
+
+	row := q.db.QueryRowContext(ctx, sqlquery, tender_id, version)
+	var i TenderHistory
+	err := row.Scan(
+		&i.Tender_id,
+		&i.Creator_id,
+		&i.ServiceType,
+		&i.Name,
+		&i.Description,
+		&i.Version,
+	)
+	return &i, err
 }

@@ -49,7 +49,7 @@ func (h *Handle) Ping(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodGet {
 		err_response["reason"] = MethodNotAllowed
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(err_response)
 		return
 	}
@@ -418,4 +418,79 @@ func (h *Handle) ChangeTender(w http.ResponseWriter, r *http.Request) {
 	})
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(new_tender)
+}
+
+func (h *Handle) RollbackTender(w http.ResponseWriter, r *http.Request) {
+	err_response := map[string]interface{}{
+		"reason": "",
+	}
+	if r.Method != http.MethodPut {
+		err_response["reason"] = MethodNotAllowed
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	pathParts := r.URL.Path[len("/api/tenders/"):]
+
+	tender_id := strings.Split(pathParts, "/")[0]
+	version_param := strings.Split(pathParts, "/")[2]
+
+	if !utils.IsNumeric(version_param) {
+		err_response["reason"] = InvalidParams + ": некорректный формат версии тендера"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	version, _ := strconv.Atoi(version_param)
+
+	_, err := uuid.Parse(tender_id)
+	if err != nil {
+		err_response["reason"] = InvalidParams + ": некорректный формат id тендера"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	queryParams := r.URL.Query()
+
+	username := queryParams.Get("username")
+	tender, err := h.srv.RollbackTender(h.ctx, service.RollbackTenderRequest{
+		Username:  username,
+		Tender_id: tender_id,
+		Version:   int32(version),
+	})
+	if err != nil {
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.IsNotResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.TenderNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.TenderHistoryNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(tender)
 }
