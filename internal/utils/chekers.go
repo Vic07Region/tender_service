@@ -15,3 +15,11 @@ func IsNumeric(s string) bool {
 	_, err := strconv.ParseFloat(s, 64)
 	return err == nil
 }
+
+func Min(a, b int) int {
+	if a > b {
+		return b
+	} else {
+		return a
+	}
+}

@@ -78,3 +78,13 @@ func (q *Queries) GetUserOrganization(ctx context.Context, user_id string) (stri
 	}
 	return org_id, nil
 }
+
+func (q *Queries) ResponsibleUserCount(ctx context.Context, org_id string) (int32, error) {
+	sqlquery := "SELECT COUNT(id) FROM organization_responsible WHERE organization_id = $1"
+	row := q.db.QueryRowContext(ctx, sqlquery, org_id)
+	var count int32
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}

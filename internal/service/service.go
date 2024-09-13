@@ -19,10 +19,12 @@ var (
 	IsResponsible         = fmt.Errorf("Пользователь является ответственным в организации")
 	TenderNotFound        = fmt.Errorf("Тендер с таким id не существует")
 	TenderHistoryNotFound = fmt.Errorf("Версия тендера с таким номером не существует")
+	OfferHistoryNotFound  = fmt.Errorf("Версия предложения с таким номером не существует")
 	NotAllowValue         = fmt.Errorf("Недопустимое значение поля")
 	BidNotFound           = fmt.Errorf("Предложение с таким id не существует")
 	IsNotAuthor           = fmt.Errorf("Пользователь не является автором")
 	BidCanceled           = fmt.Errorf("Предложение уже закрыто")
+	InvalidDecisionVallue = fmt.Errorf("Неверное значение поля decision")
 )
 
 type Service struct {
@@ -671,7 +673,7 @@ func (s *Service) EditBid(ctx context.Context, params EditBidRequest) (*Bid, err
 		if err == sql.ErrNoRows {
 			return nil, UserNotFound
 		}
-		log.Println("EditTenderStatus: FetchUserID err -", err)
+		log.Println("EditBid: FetchUserID err -", err)
 		return nil, UnknowError
 	}
 	bid, err := s.query.GetOffer(ctx, params.Bid_id)
@@ -679,7 +681,7 @@ func (s *Service) EditBid(ctx context.Context, params EditBidRequest) (*Bid, err
 		if err == sql.ErrNoRows {
 			return nil, BidNotFound
 		}
-		log.Println("EditTenderStatus: GetTender err -", err)
+		log.Println("EditBid: GetOffer err -", err)
 		return nil, UnknowError
 	}
 
@@ -704,9 +706,9 @@ func (s *Service) EditBid(ctx context.Context, params EditBidRequest) (*Bid, err
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, TenderNotFound
+			return nil, BidNotFound
 		}
-		log.Println("EditTenderStatus: EditTenderWithTX err -", err)
+		log.Println("EditBid: EditOfferWithTX err -", err)
 		return nil, UnknowError
 	}
 	return &Bid{
@@ -732,15 +734,15 @@ func (s *Service) RollbackOffer(ctx context.Context, params RollbackOfferRequest
 		if err == sql.ErrNoRows {
 			return nil, UserNotFound
 		}
-		log.Println("RollbackTender: FetchUserID err -", err)
+		log.Println("RollbackOffer: FetchUserID err -", err)
 		return nil, UnknowError
 	}
 	bid, err := s.query.GetOffer(ctx, params.Offer_id)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, TenderNotFound
+			return nil, BidNotFound
 		}
-		log.Println("RollbackTender: GetTender err -", err)
+		log.Println("RollbackOffer: GetOffer err -", err)
 		return nil, UnknowError
 	}
 
@@ -752,9 +754,9 @@ func (s *Service) RollbackOffer(ctx context.Context, params RollbackOfferRequest
 	offer_history, err := s.query.GetOfferHistory(ctx, bid.ID.String(), params.Version)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, TenderHistoryNotFound
+			return nil, OfferHistoryNotFound
 		}
-		log.Println("RollbackTender: GetTenderHistory err -", err)
+		log.Println("RollbackOffer: GetOfferHistory err -", err)
 		return nil, UnknowError
 	}
 
@@ -776,7 +778,7 @@ func (s *Service) RollbackOffer(ctx context.Context, params RollbackOfferRequest
 		if err == sql.ErrNoRows {
 			return nil, TenderNotFound
 		}
-		log.Println("RollbackTender: EditTenderWithTX err -", err)
+		log.Println("RollbackOffer: EditOfferWithTX err -", err)
 		return nil, UnknowError
 	}
 	return &Bid{
@@ -788,4 +790,255 @@ func (s *Service) RollbackOffer(ctx context.Context, params RollbackOfferRequest
 		Version:    new_tender.Version,
 		CreatedAt:  new_tender.CreatedAt,
 	}, nil
+}
+
+type DecisionRequest struct {
+	Username string
+	Bid_id   string
+	Desicion string
+}
+
+func (s *Service) DecisionSubmit(ctx context.Context, params DecisionRequest) (*Bid, error) {
+	user_id, err := s.query.FetchUserID(ctx, params.Username)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, UserNotFound
+		}
+		log.Println("Decision: FetchUserID err -", err)
+		return nil, UnknowError
+	}
+	bid, err := s.query.GetOffer(ctx, params.Bid_id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, BidNotFound
+		}
+		log.Println("Decision: GetOffer err -", err)
+		return nil, UnknowError
+	}
+	tender, err := s.query.GetTender(ctx, bid.Tender_ID.String())
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, TenderNotFound
+		}
+		log.Println("Decision: GetTender err -", err)
+		return nil, UnknowError
+	}
+	err = s.isResponsibleUser(ctx, tender.OrganizationID.String(), user_id)
+	if err != nil {
+		return nil, err
+	}
+
+	if params.Desicion == "Rejected" {
+		err = s.query.NewDecision(ctx, database.NewDecisionParams{
+			Offer_id: bid.ID.String(),
+			User_id:  user_id,
+			Decision: "Rejected",
+		})
+		if err != nil {
+			return nil, UnknowError
+		}
+		_, err = s.query.ChangeOfferStatus(ctx, bid.ID.String(), "Canceled")
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, BidNotFound
+			}
+			log.Println("Decision: ChangeOfferStatus err -", err)
+			return nil, UnknowError
+		}
+	}
+
+	if params.Desicion == "Approved" {
+		err = s.query.NewDecision(ctx, database.NewDecisionParams{
+			Offer_id: bid.ID.String(),
+			User_id:  user_id,
+			Decision: "Approved",
+		})
+		if err != nil {
+			return nil, UnknowError
+		}
+
+		approved_count, err := s.query.CountDecision(ctx, bid.ID.String())
+		if err != nil {
+			if err == sql.ErrNoRows {
+				approved_count = 0
+			}
+			return nil, UnknowError
+		}
+		userCount, err := s.query.ResponsibleUserCount(ctx, tender.OrganizationID.String())
+		if err != nil {
+			if err == sql.ErrNoRows {
+				userCount = 0
+			}
+			return nil, UnknowError
+		}
+		kvorum := utils.Min(3, int(userCount))
+		if int(approved_count) >= kvorum {
+			new_offer, err := s.query.ChangeOfferStatus(ctx, bid.ID.String(), "Approved")
+			if err != nil {
+				if err == sql.ErrNoRows {
+					return nil, BidNotFound
+				}
+				log.Println("Decision: ChangeOfferStatus kvorum err -", err)
+				return nil, UnknowError
+			}
+			_, err = s.query.ChangeTenderStatus(ctx, tender.ID.String(), "Closed")
+			if err != nil {
+				if err == sql.ErrNoRows {
+					return nil, TenderNotFound
+				}
+				log.Println("Decision: ChangeOfferStatus kvorum err -", err)
+				return nil, UnknowError
+			}
+			return &Bid{
+				ID:         new_offer.ID.String(),
+				Name:       new_offer.Name,
+				Status:     new_offer.Status,
+				AuthorType: new_offer.AuthorType,
+				AuthorId:   new_offer.AuthorId.String(),
+				Version:    new_offer.Version,
+				CreatedAt:  new_offer.CreatedAt,
+			}, nil
+		} else {
+			return &Bid{
+				ID:         bid.ID.String(),
+				Name:       bid.Name,
+				Status:     bid.Status,
+				AuthorType: bid.AuthorType,
+				AuthorId:   bid.AuthorId.String(),
+				Version:    bid.Version,
+				CreatedAt:  bid.CreatedAt,
+			}, nil
+		}
+
+	}
+	return nil, InvalidDecisionVallue
+}
+
+type NewFeedBackRequest struct {
+	Bid_id   string
+	Content  string
+	Username string
+}
+
+func (s *Service) NewFeedBack(ctx context.Context, params NewFeedBackRequest) (*Bid, error) {
+	user_id, err := s.query.FetchUserID(ctx, params.Username)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, UserNotFound
+		}
+		log.Println("NewFeedBack: FetchUserID err -", err)
+		return nil, UnknowError
+	}
+	bid, err := s.query.GetOffer(ctx, params.Bid_id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, BidNotFound
+		}
+		log.Println("NewFeedBack: GetOffer err -", err)
+		return nil, UnknowError
+	}
+	tender, err := s.query.GetTender(ctx, bid.Tender_ID.String())
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, TenderNotFound
+		}
+		log.Println("NewFeedBack: GetTender err -", err)
+		return nil, UnknowError
+	}
+	err = s.isResponsibleUser(ctx, tender.OrganizationID.String(), user_id)
+	if err != nil {
+		return nil, err
+	}
+	err = s.query.NewReview(ctx, database.NewReviewParams{
+		Offer_id: bid.ID.String(),
+		Content:  params.Content,
+		User_id:  user_id,
+	})
+	if err != nil {
+		log.Println("NewFeedBack: NewReview err -", err)
+		return nil, UnknowError
+	}
+	return &Bid{
+		ID:         bid.ID.String(),
+		Name:       bid.Name,
+		Status:     bid.Status,
+		AuthorType: bid.AuthorType,
+		AuthorId:   bid.AuthorId.String(),
+		Version:    bid.Version,
+		CreatedAt:  bid.CreatedAt,
+	}, nil
+}
+
+type ReviewResponse struct {
+	Id          string `json:"id"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"createdAt"`
+}
+
+type OfferAuthorReviewsRequest struct {
+	Tender_ID         string
+	AuthorUsername    string
+	RequesterUsername string
+	Limit             int32
+	Offset            int32
+}
+
+func (s *Service) OfferAuthorReviews(ctx context.Context, params OfferAuthorReviewsRequest) ([]ReviewResponse, error) {
+	if params.Limit <= 0 {
+		params.Limit = 5
+	}
+
+	authorUser_id, err := s.query.FetchUserID(ctx, params.AuthorUsername)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, UserNotFound
+		}
+		log.Println("OfferAuthorReviews: FetchUserID authorUser_id err -", err)
+		return nil, UnknowError
+	}
+	requesterUser_id, err := s.query.FetchUserID(ctx, params.RequesterUsername)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, UserNotFound
+		}
+		log.Println("OfferAuthorReviews: FetchUserID requesterUser_id err -", err)
+		return nil, UnknowError
+	}
+
+	tender, err := s.query.GetTender(ctx, params.Tender_ID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, TenderNotFound
+		}
+		log.Println("OfferAuthorReviews: GetTender err -", err)
+		return nil, UnknowError
+	}
+	err = s.isResponsibleUser(ctx, tender.OrganizationID.String(), requesterUser_id)
+	if err != nil {
+		return nil, err
+	}
+
+	offer, err := s.query.GetOfferByAuthor(ctx, tender.ID.String(), authorUser_id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, BidNotFound
+		}
+		log.Println("OfferAuthorReviews: GetOfferByAuthor err -", err)
+		return nil, UnknowError
+	}
+	reviews_list, err := s.query.ListReviw(ctx, database.ListReviewParam{
+		Offer_id: offer.ID.String(),
+		Limit:    params.Limit,
+		Offset:   params.Offset,
+	})
+	var reviews []ReviewResponse
+	for _, review := range reviews_list {
+		reviews = append(reviews, ReviewResponse{
+			Id:          review.ID,
+			Description: review.Description,
+			CreatedAt:   review.CreatedAt,
+		})
+	}
+
+	return reviews, nil
 }

@@ -40,11 +40,15 @@ func main() {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-
+	//database layer init
 	storage := database.NewService(db)
+	//service layer init
 	srv := service.New(storage)
+	//handles layer init
 	handle := handles.New(ctx, srv)
+	//mux router init
 	router := mux.NewRouter()
+
 	router.HandleFunc("/api/ping", handle.Ping).Methods("GET")
 	router.HandleFunc("/api/tenders", handle.TenderList)
 	router.HandleFunc("/api/tenders/new", handle.NewTender)
@@ -56,8 +60,13 @@ func main() {
 	router.HandleFunc("/api/bids/new", handle.BidNew).Methods("POST")
 	router.HandleFunc("/api/bids/{tenderID}/list", handle.BidsTender).Methods("GET")
 	router.HandleFunc("/api/bids/my", handle.MyBids).Methods("GET")
-	router.HandleFunc("/api/bids/{tenderID}/status", handle.BidStatus).Methods("GET")
-	router.HandleFunc("/api/bids/{tenderID}/status", handle.BidStatus).Methods("PUT")
+	router.HandleFunc("/api/bids/{bidid}/status", handle.BidStatus).Methods("GET")
+	router.HandleFunc("/api/bids/{bidid}/status", handle.BidStatus).Methods("PUT")
+	router.HandleFunc("/api/bids/{bidid}/edit", handle.ChangeBid).Methods("PATCH")
+	router.HandleFunc("/api/bids/{bidid}/rollback/{version}", handle.RollbackBid).Methods("PUT")
+	router.HandleFunc("/api/bids/{bidid}/submit_decision", handle.Submit_Decision).Methods("PUT")
+	router.HandleFunc("/api/bids/{bidid}/feedback", handle.Feedback).Methods("PUT")
+	router.HandleFunc("/api/bids/{tenderid}/feedback", handle.Reviews).Methods("GET")
 	fmt.Println("Сервер запущен на ", server_addres)
 	log.Fatal(http.ListenAndServe(server_addres, router))
 }

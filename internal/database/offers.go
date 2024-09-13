@@ -332,3 +332,22 @@ func (q *Queries) GetOfferHistory(ctx context.Context, offer_id string, version 
 	)
 	return &i, err
 }
+
+func (q *Queries) GetOfferByAuthor(ctx context.Context, tender_id, user_id string) (*Offer, error) {
+	sqlquery := `SELECT id, name, status, 
+       author_type, creator_id, version, 
+       created_at FROM offer WHERE tender_id = $1 AND creator_id = $2 LIMIT 1`
+	row := q.db.QueryRowContext(ctx, sqlquery, tender_id, user_id)
+	var i Offer
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.AuthorType,
+		&i.AuthorId,
+		&i.Version,
+		&i.CreatedAt,
+	)
+	return &i, err
+
+}
