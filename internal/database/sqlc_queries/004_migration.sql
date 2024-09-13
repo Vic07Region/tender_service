@@ -1,5 +1,23 @@
 -- +goose Up
 -- +goose StatementBegin
+ALTER TABLE "offer" DROP COLUMN "organization_id";
+ALTER TABLE "offer" ADD COLUMN "author_type" VARCHAR(15) NOT NULL;
+
+
+-- +goose StatementEnd
+
+
+
+-- +goose Down
+-- +goose StatementBegin
+
+
+-- +goose StatementEnd
+
+
+
+
+
 CREATE TABLE review(
     id UUID NOT NULL DEFAULT uuid_generate_v4(),
     proposal_id UUID NULL,
@@ -56,6 +74,7 @@ CREATE TABLE offer_history (
 ALTER TABLE approval ADD CONSTRAINT approval_proposal_id_foreign FOREIGN KEY (proposal_id) REFERENCES offer (id);
 ALTER TABLE tender ADD CONSTRAINT tender_organization_id_foreign FOREIGN KEY (organization_id) REFERENCES organization (id);
 ALTER TABLE review ADD CONSTRAINT review_proposal_id_foreign FOREIGN KEY (proposal_id) REFERENCES offer (id);
+ALTER TABLE offer ADD CONSTRAINT offer_organization_id_foreign FOREIGN KEY (organization_id) REFERENCES organization (id);
 ALTER TABLE offer ADD CONSTRAINT offer_tender_id_foreign FOREIGN KEY (tender_id) REFERENCES tender (id);
 ALTER TABLE review ADD CONSTRAINT review_creator_id_foreign FOREIGN KEY (creator_id) REFERENCES employee (id);
 ALTER TABLE tender ADD CONSTRAINT tender_creator_id_foreign FOREIGN KEY (creator_id) REFERENCES employee (id);
@@ -65,12 +84,3 @@ ALTER TABLE tender_history ADD CONSTRAINT tenderhistory_tender_id_foreign FOREIG
 ALTER TABLE tender_history ADD CONSTRAINT tenderhistory_employee_id_foreign FOREIGN KEY (creator_id) REFERENCES employee (id);
 ALTER TABLE offer_history ADD CONSTRAINT offerhistory_offer_id_foreign FOREIGN KEY (offer_id) REFERENCES offer (id);
 ALTER TABLE offer_history ADD CONSTRAINT tenderhistory_employee_id_foreign FOREIGN KEY (creator_id) REFERENCES employee (id);
-
-
--- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-
-
--- +goose StatementEnd

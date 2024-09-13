@@ -494,3 +494,362 @@ func (h *Handle) RollbackTender(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(tender)
 }
+
+type NewBidParam struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	TenderId    string `json:"tenderId"`
+	AuthorType  string `json:"authorType"`
+	AuthorId    string `json:"authorId"`
+}
+
+func (h *Handle) BidNew(w http.ResponseWriter, r *http.Request) {
+	err_response := map[string]interface{}{
+		"reason": "",
+	}
+	if r.Method != http.MethodPost {
+		err_response["reason"] = MethodNotAllowed
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	var params NewBidParam
+
+	err := json.NewDecoder(r.Body).Decode(&params)
+	if err != nil {
+		err_response["reason"] = InvalidParams
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	if params.Name == "" {
+		err_response["reason"] = "name" + FieldRequired
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	if params.Description == "" {
+		err_response["reason"] = "Description" + FieldRequired
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	if params.TenderId == "" {
+		err_response["reason"] = "tenderId" + FieldRequired
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	if params.AuthorType == "" {
+		err_response["reason"] = "authorType" + FieldRequired
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	if params.AuthorId == "" {
+		err_response["reason"] = "authorId" + FieldRequired
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	offer, err := h.srv.CreateNewBid(h.ctx, service.CreateBidParam{
+		Name:        params.Name,
+		Description: params.Description,
+		TenderId:    params.TenderId,
+		AuthorType:  params.AuthorType,
+		AuthorId:    params.AuthorId,
+	})
+	if err != nil {
+		if err == service.NotAllowValue {
+			err_response["reason"] = err.Error() + " authorType"
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.TenderNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.IsResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		err_response["reason"] = service.UnknowError
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(offer)
+}
+
+func (h *Handle) MyBids(w http.ResponseWriter, r *http.Request) {
+	err_response := map[string]interface{}{
+		"reason": "",
+	}
+	if r.Method != http.MethodGet {
+		err_response["reason"] = MethodNotAllowed
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	queryParams := r.URL.Query()
+	var limit, offset int32
+	limit_param := queryParams.Get("limit")
+	offset_param := queryParams.Get("offset")
+	username := queryParams.Get("username")
+
+	if limit_param == "" || !utils.IsNumeric(limit_param) {
+		limit = 5
+	} else {
+		tl, _ := strconv.Atoi(limit_param)
+		limit = int32(tl)
+	}
+
+	if offset_param == "" || !utils.IsNumeric(offset_param) {
+		offset = 0
+	} else {
+		tl, _ := strconv.Atoi(offset_param)
+		offset = int32(tl)
+	}
+	listoffer, err := h.srv.ListMyBids(h.ctx, service.ListMyBidsRequest{
+		Username: username,
+		Offset:   offset,
+		Limit:    limit,
+	})
+	if err != nil {
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(listoffer)
+}
+
+func (h *Handle) BidsTender(w http.ResponseWriter, r *http.Request) {
+	err_response := map[string]interface{}{
+		"reason": "",
+	}
+	if r.Method != http.MethodGet {
+		err_response["reason"] = MethodNotAllowed
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	queryParams := r.URL.Query()
+	var limit, offset int32
+	limit_param := queryParams.Get("limit")
+	offset_param := queryParams.Get("offset")
+	username := queryParams.Get("username")
+
+	pathParts := r.URL.Path[len("/api/bids/"):]
+	tender_id := strings.Split(pathParts, "/")[0]
+
+	_, err := uuid.Parse(tender_id)
+	if err != nil {
+		err_response["reason"] = InvalidParams + ": некорректный формат id тендера"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	if limit_param == "" || !utils.IsNumeric(limit_param) {
+		limit = 5
+	} else {
+		tl, _ := strconv.Atoi(limit_param)
+		limit = int32(tl)
+	}
+
+	if offset_param == "" || !utils.IsNumeric(offset_param) {
+		offset = 0
+	} else {
+		tl, _ := strconv.Atoi(offset_param)
+		offset = int32(tl)
+	}
+	listoffer, err := h.srv.TenderListBids(h.ctx, service.TenderListBidsRequest{
+		Tender_id: tender_id,
+		Username:  username,
+		Offset:    offset,
+		Limit:     limit,
+	})
+	if err != nil {
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.TenderNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.IsNotResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(listoffer)
+}
+
+func (h *Handle) BidStatus(w http.ResponseWriter, r *http.Request) {
+	err_response := map[string]interface{}{
+		"reason": "",
+	}
+	if r.Method != http.MethodGet {
+		err_response["reason"] = MethodNotAllowed
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	queryParams := r.URL.Query()
+	username := queryParams.Get("username")
+
+	pathParts := r.URL.Path[len("/api/bids/"):]
+	bid_id := strings.Split(pathParts, "/")[0]
+
+	_, err := uuid.Parse(bid_id)
+	if err != nil {
+		err_response["reason"] = InvalidParams + ": некорректный формат id тендера"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	bid_status, err := h.srv.GetBidStatus(h.ctx, service.GetBidStatus{
+		Username: username,
+		BidID:    bid_id,
+	})
+	if err != nil {
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.BidNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.IsNotResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(bid_status)
+}
+
+func (h *Handle) ChangeBidStatus(w http.ResponseWriter, r *http.Request) {
+	err_response := map[string]interface{}{
+		"reason": "",
+	}
+	if r.Method != http.MethodPut {
+		err_response["reason"] = MethodNotAllowed
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	allowed_value := []string{"Created", "Published", "Canceled"}
+
+	queryParams := r.URL.Query()
+	username := queryParams.Get("username")
+	status := queryParams.Get("status")
+
+	pathParts := r.URL.Path[len("/api/bids/"):]
+	bid_id := strings.Split(pathParts, "/")[0]
+
+	_, err := uuid.Parse(bid_id)
+	if err != nil {
+		err_response["reason"] = InvalidParams + ": некорректный формат id тендера"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	if !utils.CheckString(status, allowed_value) {
+		err_response["reason"] = InvalidParams + ": неверное значение status"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+
+	bid, err := h.srv.ChangeBidStatus(h.ctx, service.ChangeBidStatus{
+		Username: username,
+		BidID:    bid_id,
+		Status:   status,
+	})
+	if err != nil {
+		if err == service.UserNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.BidNotFound {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		if err == service.IsNotResponsible {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+
+		if err == service.BidCanceled {
+			err_response["reason"] = err.Error()
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(err_response)
+			return
+		}
+		err_response["reason"] = err.Error()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(err_response)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(bid)
+}

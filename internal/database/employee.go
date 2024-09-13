@@ -27,6 +27,33 @@ func (q *Queries) FetchUserID(ctx context.Context, username string) (string, err
 	return name, nil
 }
 
+type User struct {
+	ID        uuid.UUID
+	Username  string
+	Firstname string
+	Lastname  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (q *Queries) FetchUser(ctx context.Context, user_id string) (*User, error) {
+	sqlquery := "SELECT * FROM employee WHERE id = $1 LIMIT 1"
+	row := q.db.QueryRowContext(ctx, sqlquery, user_id)
+
+	var user User
+	if err := row.Scan(
+		&user.ID,
+		&user.Username,
+		&user.Firstname,
+		&user.Lastname,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (q *Queries) IsResponsible(ctx context.Context, org_id, user_id string) (bool, error) {
 	sqlquery := "SELECT user_id FROM organization_responsible WHERE organization_id = $1 LIMIT 1"
 	row := q.db.QueryRowContext(ctx, sqlquery, org_id)
@@ -39,4 +66,15 @@ func (q *Queries) IsResponsible(ctx context.Context, org_id, user_id string) (bo
 		return false, err
 	}
 	return userid == user_id, nil
+}
+
+func (q *Queries) GetUserOrganization(ctx context.Context, user_id string) (string, error) {
+	sqlquery := "SELECT organization_id FROM organization_responsible WHERE user_id = $1 LIMIT 1"
+	row := q.db.QueryRowContext(ctx, sqlquery, user_id)
+
+	var org_id string
+	if err := row.Scan(&org_id); err != nil {
+		return "", err
+	}
+	return org_id, nil
 }
