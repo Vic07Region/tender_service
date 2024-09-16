@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
 	"log"
 	"net/http"
 	"os"
@@ -14,13 +13,6 @@ import (
 )
 
 func main() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		fmt.Println("Ошибка загрузки файла .env:", err)
-		return
-	}
-
-	//todo убрать godotenv
 	dbhost := os.Getenv("POSTGRES_HOST")
 	dbname := os.Getenv("POSTGRES_DATABASE")
 	dbport := os.Getenv("POSTGRES_PORT")
@@ -34,19 +26,14 @@ func main() {
 		dbhost,
 		dbport,
 	)
-	fmt.Println(conn_str)
-	db, err := database.New("user=postgres dbname=tenders password=85428542 sslmode=disable")
+	db, err := database.New(conn_str)
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	//database layer init
 	storage := database.NewService(db)
-	//service layer init
 	srv := service.New(storage)
-	//handles layer init
 	handle := handles.New(ctx, srv)
-	//mux router init
 	router := mux.NewRouter()
 
 	router.HandleFunc("/api/ping", handle.Ping).Methods("GET")
